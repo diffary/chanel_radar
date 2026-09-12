@@ -8,7 +8,7 @@ from app.routes import pages
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     await init_db()
     yield
 
