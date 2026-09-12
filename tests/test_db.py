@@ -31,3 +31,9 @@ def test_sqlite_url_untouched():
     url, connect_args = make_engine_url(raw)
     assert str(url) == raw
     assert connect_args == {}
+
+
+def test_required_ssl_flag():
+    url, connect_args = make_engine_url("postgresql://user:pw@host/db?sslmode=require", required_ssl=False)
+    assert url.drivername == "postgresql+asyncpg"
+    assert connect_args == {}

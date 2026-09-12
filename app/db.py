@@ -6,21 +6,24 @@ from sqlalchemy.orm import DeclarativeBase
 from app.config import settings
 
 
-def make_engine_url(raw: str) -> tuple[URL, dict]:
+def make_engine_url(raw: str, required_ssl: bool=True) -> tuple[URL, dict]:
     """Turn the DATABASE_URL from env into (url, connect_args) for create_async_engine.
-
+    If required_ssl is True, the connection will require SSL.
+    bool == True
     Neon hands out `postgresql://...?sslmode=require&channel_binding=require`;
     asyncpg rejects those query params, so we strip them and pass ssl via connect_args.
     Non-Postgres URLs (sqlite in tests) are returned unchanged.
     """
-    # Env values pasted from .env files often keep their quotes.
+    # Env values pasted from .env files often keep their quotes. 
     raw = raw.strip().strip("\"'")
     url = make_url(raw)
     if not url.drivername.startswith("postgresql"):
         return url, {}
     query = {k: v for k, v in url.query.items() if k not in ("sslmode", "channel_binding")}
     url = url.set(drivername="postgresql+asyncpg", query=query)
-    return url, {"ssl": "require"}
+    return url, {"ssl": "require"} if required_ssl else {}
+    
+
 
 
 _url, _connect_args = make_engine_url(settings.DATABASE_URL)
