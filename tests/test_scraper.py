@@ -28,6 +28,9 @@ def load_fixture(name: str) -> str:
         ("102", 102),
         ("1 234", 1234),
         ("1,234", 1234),
+        ("12.5", 12),
+        ("-5", 0),
+        ("5B", 0),
         ("", 0),
         (None, 0),
     ],
@@ -50,10 +53,18 @@ def test_parse_count(text, expected):
         ("t.me/durov", "durov"),
         ("https://t.me/s/durov", "durov"),
         ("t.me/s/durov/", "durov"),
+        ("durov/123", "durov"),
+        ("durov?foo=1", "durov"),
     ],
 )
 def test_normalize_username(raw, expected):
     assert scraper.normalize_username(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["", "@", "bad name!", "abc", "durov!"])
+def test_normalize_username_rejects_invalid(raw):
+    with pytest.raises(ValueError):
+        scraper.normalize_username(raw)
 
 
 # --- parse_channel -----------------------------------------------------------
@@ -76,8 +87,8 @@ def test_parse_durov_first_post():
     assert post["posted_at"] == datetime(2026, 6, 15, 18, 58, 13, tzinfo=timezone.utc)
     assert post["link"] == "https://t.me/durov/528"
     assert post["text"].startswith("⛔️ The UK government wants to ban")
-    # 14.3K (paid stars) + 132K + 39.8K + 24.7K + 22.1K + 754
-    assert post["reactions"] == 233_654
+    # paid stars + five emoji reactions
+    assert post["reactions"] == 14_300 + 132_000 + 39_800 + 24_700 + 22_100 + 754
 
 
 def test_parse_durov_posts_sorted_by_message_id():
@@ -120,6 +131,37 @@ def test_parse_channel_with_no_posts_raises_unavailable():
     )
     with pytest.raises(ChannelUnavailable):
         scraper.parse_channel(html)
+
+
+GOOD_POST = (
+    '<div class="tgme_widget_message" data-post="chan/10">'
+    '<div class="tgme_widget_message_text">hello</div>'
+    '<a class="tgme_widget_message_date"><time datetime="2026-01-01T00:00:00+00:00"></time></a>'
+    "</div>"
+)
+POST_WITHOUT_DATE = (
+    '<div class="tgme_widget_message" data-post="chan/11">'
+    '<div class="tgme_widget_message_text">no date</div>'
+    "</div>"
+)
+POST_WITH_BAD_ID = (
+    '<div class="tgme_widget_message" data-post="garbage">'
+    '<a class="tgme_widget_message_date"><time datetime="2026-01-01T00:00:00+00:00"></time></a>'
+    "</div>"
+)
+
+
+def test_parse_channel_skips_malformed_posts():
+    html = (
+        '<html><body><div class="tgme_channel_info"></div>'
+        + GOOD_POST
+        + POST_WITHOUT_DATE
+        + POST_WITH_BAD_ID
+        + "</body></html>"
+    )
+    result = scraper.parse_channel(html)
+
+    assert [post["message_id"] for post in result["posts"]] == [10]
 
 
 # --- fetch (mocked transport, no network) -----------------------------------
