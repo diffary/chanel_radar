@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+pydantic-settings
+httpx
+beautifulsoup4
+lxml
+jinja2
+google-generativeai
+python-dotenv
+
+# dev / tests
+pytest
+pytest-asyncio
+aiosqlite
