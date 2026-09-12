@@ -29,5 +29,7 @@ _TODO: what it does (digest / categorize) and what happens when Gemini is down o
 ## Hosting
 _TODO: chosen host + why, its limits (cold start / sleep), and how the scheduled collection wakes it (external cron via GitHub Actions)._
 
+Tables are created with `Base.metadata.create_all` on startup — a deliberate simplification for this project; production would use Alembic migrations.
+
 ## What's not done and why
 _TODO._
