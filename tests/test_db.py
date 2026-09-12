@@ -8,6 +8,16 @@ def test_neon_url_is_converted_for_asyncpg():
     assert "sslmode" not in url.query
     assert "channel_binding" not in url.query
     assert connect_args == {"ssl": "require"}
+    assert url.host == "host.neon.tech"
+    assert url.username == "user"
+    assert url.database == "db"
+
+
+def test_quoted_url_is_accepted():
+    url, _ = make_engine_url('"postgresql://user:pw@host/db?sslmode=require"')
+    assert url.drivername == "postgresql+asyncpg"
+    assert url.host == "host"
+    assert "sslmode" not in url.query
 
 
 def test_asyncpg_url_stays_asyncpg():

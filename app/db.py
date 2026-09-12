@@ -13,6 +13,8 @@ def make_engine_url(raw: str) -> tuple[URL, dict]:
     asyncpg rejects those query params, so we strip them and pass ssl via connect_args.
     Non-Postgres URLs (sqlite in tests) are returned unchanged.
     """
+    # Env values pasted from .env files often keep their quotes.
+    raw = raw.strip().strip("\"'")
     url = make_url(raw)
     if not url.drivername.startswith("postgresql"):
         return url, {}
