@@ -1,6 +1,6 @@
 # channel-radar
 
-> 🔗 **Live service:** _TODO: paste public URL here at the very top (graded)_
+> 🔗 **Live service:** https://channel-radar.onrender.com — health check: https://channel-radar.onrender.com/health
 
 Live dashboard for public Telegram channel analytics. Add a channel by username, watch it
 collect posts and metric history, read an LLM digest — all at a public URL.
