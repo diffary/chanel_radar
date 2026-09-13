@@ -51,7 +51,7 @@
             <div class="reason">{{ c.error_reason }}</div>
           {% else %}
             <span class="badge active">active</span>
-            <div class="muted">{{ c.last_collected_at }}</div>
+            <div class="muted">{{ c.last_collected_at.strftime("%Y-%m-%d %H:%M") }} UTC</div>
           {% endif %}
         </td>
       </tr>

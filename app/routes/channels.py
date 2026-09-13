@@ -1,18 +1,22 @@
 """JSON API for channels. Thin layer: validate input, call collector, return schemas."""
 import logging
+from datetime import timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import collector, scraper
 from app.db import SessionLocal, get_session
-from app.models import Channel
+from app.models import Channel, utcnow
 from app.schemas import ChannelCreate, ChannelOut
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/channels", tags=["channels"])
+
+RECOLLECT_AFTER = timedelta(seconds=60)
 
 
 async def run_collection(username: str) -> None:
@@ -36,7 +40,6 @@ async def add_channel(
     """Shared by the JSON route and the HTML form route.
 
     Returns (channel, created). Raises ValueError on an invalid username.
-    Collection is scheduled every time, so re-adding a channel refreshes it.
     """
     username = scraper.normalize_username(raw_username)
     channel = (
@@ -45,9 +48,21 @@ async def add_channel(
     created = channel is None
     if created:
         channel = await collector.get_or_create_channel(session, username)
-        await session.commit()
-    # `run_collection` is looked up on this module at call time, so tests can patch it
-    background_tasks.add_task(run_collection, username)
+        try:
+            await session.commit()
+        except IntegrityError:
+            # someone else inserted the same username first: use their row
+            await session.rollback()
+            channel = (
+                await session.execute(select(Channel).where(Channel.username == username))
+            ).scalar_one()
+            created = False
+    # Re-adding refreshes the channel, but not more than once a minute.
+    # Time-based rather than status-based so a row stuck in "pending" can be
+    # un-stuck by simply adding it again.
+    if channel.last_collected_at is None or utcnow() - channel.last_collected_at > RECOLLECT_AFTER:
+        # `run_collection` is looked up on this module at call time, so tests can patch it
+        background_tasks.add_task(run_collection, username)
     return channel, created
 
 

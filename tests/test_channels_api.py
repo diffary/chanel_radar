@@ -2,24 +2,14 @@
 runner `app.routes.channels.run_collection` is monkeypatched with a fake that
 only records which username it was asked to collect.
 """
+from datetime import timedelta
+
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.models import Channel
+from app.models import Channel, utcnow
 from app.routes import channels
-
-
-@pytest.fixture(autouse=True)
-async def clean_channels(client):
-    """The app's in-memory SQLite lives for the whole pytest process (StaticPool,
-    one shared connection), so rows added by one test would be visible to the
-    next. Simplest fix: wipe the channels table before every test. These tests
-    create no posts/snapshots, so deleting channels alone is enough.
-    """
-    async with SessionLocal() as session:
-        await session.execute(delete(Channel))
-        await session.commit()
 
 
 @pytest.fixture
@@ -102,3 +92,54 @@ async def test_run_collection_swallows_exceptions(monkeypatch):
 
     monkeypatch.setattr(channels.collector, "collect_channel", exploding_collect_channel)
     await channels.run_collection("durov")  # must not raise
+
+
+async def test_post_lost_insert_race_returns_existing_row(client, collected, monkeypatch):
+    """Two first-time adds racing: the other request inserts the row between our
+    select and our commit. Simulated by a fake get_or_create_channel that commits
+    the row through its own session and hands back a second, unsaved copy."""
+
+    async def racing_get_or_create(session, username):
+        async with SessionLocal() as other:
+            other.add(Channel(username=username, status="pending"))
+            await other.commit()
+        duplicate = Channel(username=username, status="pending")
+        session.add(duplicate)
+        return duplicate
+
+    monkeypatch.setattr(channels.collector, "get_or_create_channel", racing_get_or_create)
+
+    r = await client.post("/channels", json={"username": "racechan"})
+    assert r.status_code == 200
+    assert r.json()["username"] == "racechan"
+    async with SessionLocal() as session:
+        rows = (await session.execute(select(Channel).where(Channel.username == "racechan"))).scalars().all()
+    assert len(rows) == 1
+    assert r.json()["id"] == rows[0].id
+
+
+async def set_last_collected(username: str, when) -> None:
+    async with SessionLocal() as session:
+        channel = (await session.execute(select(Channel).where(Channel.username == username))).scalar_one()
+        channel.last_collected_at = when
+        await session.commit()
+
+
+async def test_recent_channel_is_not_recollected(client, collected):
+    await client.post("/channels", json={"username": "durov"})
+    await set_last_collected("durov", utcnow())
+    collected.clear()
+
+    r = await client.post("/channels", json={"username": "durov"})
+    assert r.status_code == 200
+    assert collected == []
+
+
+async def test_stale_channel_is_recollected(client, collected):
+    await client.post("/channels", json={"username": "durov"})
+    await set_last_collected("durov", utcnow() - timedelta(minutes=5))
+    collected.clear()
+
+    r = await client.post("/channels", json={"username": "durov"})
+    assert r.status_code == 200
+    assert collected == ["durov"]
