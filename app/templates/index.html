@@ -4,9 +4,69 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>channel-radar</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    form { display: flex; gap: .5rem; margin-bottom: 1rem; }
+    input[type=text] { flex: 1; padding: .5rem; font-size: 1rem; }
+    button { padding: .5rem 1rem; font-size: 1rem; cursor: pointer; }
+    .error { background: #fde8e8; color: #a00; padding: .6rem .8rem; border-radius: 4px; margin-bottom: 1rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: .5rem; border-bottom: 1px solid #ddd; vertical-align: top; }
+    .badge { display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-size: .85rem; }
+    .pending { background: #fff3cd; color: #7a5a00; }
+    .active { background: #d4edda; color: #155724; }
+    .failed { background: #fde8e8; color: #a00; }
+    .reason { color: #a00; font-size: .85rem; }
+    .muted { color: #777; font-size: .85rem; }
+  </style>
 </head>
 <body>
   <h1>channel-radar</h1>
-  <p>Telegram channel analytics dashboard — coming soon.</p>
+
+  <form method="post" action="/add">
+    <input type="text" name="username" placeholder="@durov or t.me/durov" required autofocus>
+    <button type="submit">Add channel</button>
+  </form>
+
+  {% if error %}
+  <div class="error">{{ error }}</div>
+  {% endif %}
+
+  {% if channels %}
+  <table>
+    <thead>
+      <tr><th>Channel</th><th>Title</th><th>Subscribers</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      {% for c in channels %}
+      <tr>
+        <td><a href="/channels/{{ c.username }}">@{{ c.username }}</a></td>
+        <td>{{ c.title or "" }}</td>
+        <td>{{ c.subscribers }}</td>
+        <td>
+          {% if c.status == "pending" %}
+            <span class="badge pending">collecting&hellip;</span>
+          {% elif c.status == "error" %}
+            <span class="badge failed">error</span>
+            <div class="reason">{{ c.error_reason }}</div>
+          {% else %}
+            <span class="badge active">active</span>
+            <div class="muted">{{ c.last_collected_at }}</div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No channels yet. Add one above.</p>
+  {% endif %}
+
+  <script>
+    // While any channel is still "collecting", reload to pick up the result.
+    if (document.querySelector(".badge.pending")) {
+      setTimeout(function () { location.reload(); }, 3000);
+    }
+  </script>
 </body>
 </html>
