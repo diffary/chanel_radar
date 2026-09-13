@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app import models  # noqa: F401  register tables with Base.metadata
 from app.db import init_db
 from app.routes import pages
 
