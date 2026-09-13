@@ -3,12 +3,22 @@
 The scraper is passed in as `scrape=` so tests can inject a fake that returns
 a payload dict; the default is the real `app.scraper.scrape`.
 """
+from datetime import datetime, timezone
+
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import scraper
 from app.models import Channel, ChannelMetricSnapshot, Post, PostMetricSnapshot, utcnow
 from app.scraper import ScrapeError
+
+
+def to_naive_utc(dt: datetime) -> datetime:
+    """The scraper yields tz-aware datetimes; the DB stores naive UTC (see models.utcnow)."""
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 async def get_or_create_channel(session: AsyncSession, username: str) -> Channel:
@@ -38,7 +48,7 @@ async def upsert_posts(session: AsyncSession, channel: Channel, posts: list[dict
                 channel_id=channel.id,
                 message_id=data["message_id"],
                 text=data["text"],
-                posted_at=data["posted_at"],
+                posted_at=to_naive_utc(data["posted_at"]),
                 link=data["link"],
             )
             session.add(post)
@@ -57,7 +67,10 @@ async def count_posts(session: AsyncSession, channel: Channel) -> int:
 
 async def collect_channel(session: AsyncSession, username: str, scrape=scraper.scrape) -> Channel:
     """Run one collection for a channel. Never raises on scrape failure:
-    the failure is recorded on the channel row (status='error') instead."""
+    the failure is recorded on the channel row (status='error') instead.
+
+    Commits. The caller supplies a session and must not commit itself.
+    """
     username = scraper.normalize_username(username)
     channel = await get_or_create_channel(session, username)
 
@@ -74,6 +87,7 @@ async def collect_channel(session: AsyncSession, username: str, scrape=scraper.s
         ChannelMetricSnapshot(
             channel_id=channel.id,
             subscribers=payload["subscribers"],
+            # flush() already ran, so this count includes the posts inserted this run
             post_count=await count_posts(session, channel),
         )
     )
@@ -92,4 +106,11 @@ async def collect_all_active(session: AsyncSession, scrape=scraper.scrape) -> li
     channels = (
         await session.execute(select(Channel).where(Channel.status.in_(("active", "pending"))))
     ).scalars().all()
-    return [await collect_channel(session, c.username, scrape=scrape) for c in channels]
+    collected: list[Channel] = []
+    for c in channels:
+        try:
+            collected.append(await collect_channel(session, c.username, scrape=scrape))
+        except IntegrityError:
+            # another run inserted the same row first; skip this channel, continue with the rest
+            await session.rollback()
+    return collected

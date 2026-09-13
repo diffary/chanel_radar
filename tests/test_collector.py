@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.collector import collect_all_active, collect_channel
+from app.collector import collect_all_active, collect_channel, to_naive_utc
 from app.db import Base
 from app.models import Channel, ChannelMetricSnapshot, Post, PostMetricSnapshot
 from app.scraper import ChannelNotFound
@@ -87,6 +87,13 @@ async def test_first_run_creates_channel_posts_and_snapshots(session, payload):
     assert snap.subscribers == 1000
     assert snap.post_count == 2
 
+    session.expire_all()  # re-read from the DB, not from the identity map
+    post10 = (await session.execute(select(Post).where(Post.message_id == 10))).scalar_one()
+    assert post10.posted_at.tzinfo is None
+    assert post10.posted_at == datetime(2026, 9, 1, 12, 10)  # naive UTC
+    channel = (await session.execute(select(Channel))).scalar_one()
+    assert channel.last_collected_at.tzinfo is None
+
 
 # --- 2. idempotency ---------------------------------------------------------------
 
@@ -123,6 +130,7 @@ async def test_second_run_with_changed_payload_updates_metrics_and_adds_post(ses
         ],
     }
     await collect_channel(session, "testchan", scrape=fake_scrape_returning(changed))
+    session.expire_all()  # force re-read from the DB so the comparisons below are honest
 
     assert await count(session, Post) == 3
 
@@ -223,3 +231,33 @@ async def test_unique_constraint_on_channel_and_message_id(session):
     with pytest.raises(IntegrityError):
         await session.flush()
     await session.rollback()
+
+
+async def test_session_is_usable_after_integrity_error_and_rollback(session):
+    """Mirrors the except-branch of collect_all_active: rollback, then carry on."""
+    channel = Channel(username="testchan")
+    session.add(channel)
+    await session.flush()
+    posted_at = datetime(2026, 9, 1)
+    session.add(Post(channel_id=channel.id, message_id=1, text="a", posted_at=posted_at, link="l"))
+    await session.commit()
+
+    session.add(Post(channel_id=channel.id, message_id=1, text="b", posted_at=posted_at, link="l"))
+    with pytest.raises(IntegrityError):
+        await session.flush()
+    await session.rollback()
+
+    assert await count(session, Post) == 1
+
+
+# --- to_naive_utc -----------------------------------------------------------------
+
+
+def test_to_naive_utc_shifts_aware_datetime_to_utc():
+    plus3 = timezone(timedelta(hours=3))
+    assert to_naive_utc(datetime(2026, 9, 1, 15, 0, tzinfo=plus3)) == datetime(2026, 9, 1, 12, 0)
+
+
+def test_to_naive_utc_passes_naive_through():
+    naive = datetime(2026, 9, 1, 12, 0)
+    assert to_naive_utc(naive) == naive
